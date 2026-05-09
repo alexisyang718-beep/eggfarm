@@ -33,8 +33,8 @@
     #stage {
       position: relative;
       width: min(100vw, 430px);
-      height: min(100vh, calc(min(100vw, 430px) * 844 / 390));
-      aspect-ratio: 390 / 844;
+      height: min(100vh, calc(min(100vw, 430px) * 1080 / 608));
+      aspect-ratio: 608 / 1080;
       overflow: hidden;
       background: #64c95f;
       box-shadow: 0 20px 70px rgba(0,0,0,.65);
@@ -186,8 +186,8 @@
   </main>
 
   <script>
-    const W = 390;
-    const H = 844;
+    const W = 608;
+    const H = 1080;
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
     const joy = document.getElementById('joystick');
@@ -207,7 +207,7 @@
 
     const game = {
       money: 0,
-      targetMoney: 100,
+      targetMoney: 1000,
       carriedEggs: 0,
       carriedCash: 0,
       eggValue: 20,
@@ -215,30 +215,37 @@
       collectTimer: 0,
       sellTimer: 0,
       cashTimer: 0,
+      eggBatchTimer: 0,
       moneyPulse: 0,
       time: 0,
       floating: [],
       bills: [],
       eggsSpark: [],
-      player: { x: 188, y: 410, r: 20, speed: 2.65, dir: 1, moving: false, bob: 0 }
+      productionEggs: [],
+      nextEggId: 1,
+      player: { x: 420, y: 620, r: 20, speed: 3.25, dir: 1, moving: false, bob: 0 }
     };
 
-    const eggZone = { x: 106, y: 245, rx: 92, ry: 66 };
-    const basketZone = { x: 106, y: 332, w: 92, h: 58 };
-    const counterZone = { x: 284, y: 560, w: 116, h: 110 };
-    const sellPad = { x: 284, y: 438, w: 116, h: 66 };
-    const cashPad = { x: 182, y: 585, w: 96, h: 74 };
-    const moneyTarget = { x: 272, y: 33 };
+    const eggZone = { x: 455, y: 258, rx: 170, ry: 120 };
+    const basketZone = { x: 430, y: 400, w: 320, h: 140 };
+    const counterZone = { x: 278, y: 604, w: 244, h: 176 };
+    const sellPad = { x: 354, y: 565, w: 220, h: 180 };
+    const cashPad = { x: 455, y: 675, w: 150, h: 120 };
+    const moneyTarget = { x: 414, y: 38 };
+    const playableArea = [
+      { x: 0, y: 260 },
+      { x: 1920, y: 0 },
+      { x: 1920, y: 1080 },
+      { x: 0, y: 1080 }
+    ];
 
     const input = { x: 0, y: 0, active: false, keys: new Set() };
 
     const assetPaths = {
-      grass: 'assets/grass_tile.png',
-      eggField: 'assets/processed/egg_field.png',
+      background: 'assets/background-egg.png',
       egg: 'assets/processed/egg_single.png',
-      counter: 'assets/processed/sales_counter.png',
       cashBill: 'assets/processed/cash_bill.png',
-      cashStack: 'assets/processed/cash_stack.png'
+      playerAvatar: 'assets/processed/player_avatar.png'
     };
     const assets = {};
     for (const [key, src] of Object.entries(assetPaths)) {
@@ -257,17 +264,61 @@
       return true;
     }
 
+    const eggSlots = [
+      {x:420,y:150,s:.72},{x:462,y:145,s:.72},{x:506,y:145,s:.72},{x:550,y:150,s:.72},{x:590,y:158,s:.72},
+      {x:382,y:182,s:.78},{x:425,y:178,s:.78},{x:468,y:176,s:.78},{x:512,y:178,s:.78},{x:556,y:184,s:.78},{x:596,y:192,s:.78},
+      {x:356,y:222,s:.84},{x:400,y:214,s:.84},{x:444,y:210,s:.84},{x:490,y:214,s:.84},{x:536,y:222,s:.84},{x:580,y:232,s:.84},
+      {x:350,y:265,s:.9},{x:396,y:255,s:.9},{x:442,y:250,s:.9},{x:490,y:255,s:.9},{x:538,y:266,s:.9},{x:585,y:282,s:.9},
+      {x:366,y:310,s:.96},{x:414,y:300,s:.96},{x:462,y:294,s:.96},{x:512,y:302,s:.96},{x:560,y:318,s:.96},
+      {x:390,y:350,s:1},{x:442,y:342,s:1},{x:494,y:344,s:1},{x:546,y:360,s:1},
+      {x:420,y:386,s:1.04},{x:478,y:384,s:1.04},{x:535,y:396,s:1.04}
+    ];
+    const eggBatchSize = 35;
+    const eggBatchInterval = 10000;
+    const collectInterval = 120;
+    const maxCarriedEggs = 30;
+
+    function spawnEggBatch(count = eggBatchSize) {
+      const occupied = new Set(game.productionEggs.map(e => e.slot));
+      const free = eggSlots.map((_, i) => i).filter(i => !occupied.has(i));
+      for (let i = 0; i < Math.min(count, free.length); i++) {
+        const slotIndex = free[i];
+        const slot = eggSlots[slotIndex];
+        game.productionEggs.push({
+          id: game.nextEggId++,
+          slot: slotIndex,
+          x: slot.x,
+          y: slot.y,
+          s: slot.s,
+          born: game.time + i * 45
+        });
+      }
+      game.productionEggs.sort((a, b) => a.y - b.y);
+    }
+
     function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
     function dist(a, b, c, d) { return Math.hypot(a - c, b - d); }
     function inEllipse(px, py, z) { return ((px-z.x)**2)/(z.rx*z.rx) + ((py-z.y)**2)/(z.ry*z.ry) <= 1; }
     function inRect(px, py, z) { return px >= z.x-z.w/2 && px <= z.x+z.w/2 && py >= z.y-z.h/2 && py <= z.y+z.h/2; }
+    function inPolygon(px, py, points) {
+      let inside = false;
+      for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+        const xi = points[i].x, yi = points[i].y;
+        const xj = points[j].x, yj = points[j].y;
+        const hit = ((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+        if (hit) inside = !inside;
+      }
+      return inside;
+    }
     function ease(t) { return 1 - Math.pow(1 - t, 3); }
     function isBlocked(px, py) {
       const footY = py + 30;
-      const insideEggField = inEllipse(px, footY, { x: eggZone.x, y: eggZone.y, rx: eggZone.rx + 4, ry: eggZone.ry + 4 });
-      const insideCounter = inRect(px, footY, { x: counterZone.x, y: counterZone.y + 8, w: 184, h: 120 });
-      return insideEggField || insideCounter;
+      const outsideGrass = !inPolygon(px, footY, playableArea);
+      const insideEggField = inEllipse(px, footY, { x: eggZone.x, y: eggZone.y, rx: eggZone.rx, ry: eggZone.ry });
+      return outsideGrass || insideEggField;
     }
+
+    spawnEggBatch();
 
     function roundRect(x, y, w, h, r) {
       ctx.beginPath();
@@ -317,7 +368,7 @@
     }
 
     function drawMoneyBill(x, y, s = 1, rot = 0) {
-      if (drawAsset('cashBill', x, y, 36 * s, 26 * s, rot)) return;
+      if (drawAsset('cashBill', x, y, 46 * s, 35 * s, rot)) return;
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(rot);
@@ -368,13 +419,8 @@
     }
 
     function drawGround() {
-      if (ready('grass')) {
-        const tile = 256;
-        for (let y = -20; y < H; y += tile) {
-          for (let x = -20; x < W; x += tile) {
-            ctx.drawImage(assets.grass, x, y, tile, tile);
-          }
-        }
+      if (ready('background')) {
+        ctx.drawImage(assets.background, 0, 0, W, H);
       } else {
         const sky = ctx.createLinearGradient(0, 0, 0, H);
         sky.addColorStop(0, '#7edc65');
@@ -382,37 +428,7 @@
         sky.addColorStop(1, '#3fbf68');
         ctx.fillStyle = sky;
         ctx.fillRect(0, 0, W, H);
-
-        ctx.save();
-        ctx.globalAlpha = .25;
-        for (let i = 0; i < 120; i++) {
-          const x = (i * 67) % W;
-          const y = (i * 113) % H;
-          ctx.fillStyle = i % 2 ? '#9cef86' : '#2f9e52';
-          ctx.beginPath();
-          ctx.ellipse(x, y, 2.5, 1.1, (i % 8) * .5, 0, Math.PI*2);
-          ctx.fill();
-        }
-        ctx.restore();
       }
-
-      ctx.fillStyle = '#e6a45a';
-      ctx.beginPath();
-      ctx.moveTo(-70, 548);
-      ctx.bezierCurveTo(30, 505, 118, 524, 190, 584);
-      ctx.bezierCurveTo(252, 636, 348, 630, 470, 568);
-      ctx.lineTo(470, 820);
-      ctx.bezierCurveTo(326, 760, 244, 754, 159, 790);
-      ctx.bezierCurveTo(70, 828, -25, 792, -70, 720);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = 'rgba(255,255,255,.35)';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(-30, 570);
-      ctx.bezierCurveTo(80, 538, 137, 558, 206, 612);
-      ctx.stroke();
     }
 
     function drawFenceSegment(x1, y1, x2, y2) {
@@ -535,28 +551,27 @@
       ctx.restore();
     }
 
+    function drawProductionEggs() {
+      for (const egg of game.productionEggs) {
+        const age = Math.max(0, game.time - egg.born);
+        const appear = Math.min(1, age / 260);
+        const pop = 1 + Math.sin(appear * Math.PI) * .18;
+        ctx.save();
+        ctx.globalAlpha = appear;
+        drawEgg(egg.x, egg.y - Math.sin(appear * Math.PI) * 8, egg.s * pop);
+        ctx.restore();
+      }
+    }
+
     function drawInteractionPads() {
       const p = game.player;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(47,233,255,.9)';
-      ctx.lineWidth = 4;
-      ctx.setLineDash([14, 10]);
-      ctx.shadowColor = 'rgba(47,233,255,.75)';
-      ctx.shadowBlur = 13;
       if (game.carriedEggs > 0) {
-        roundRect(sellPad.x - sellPad.w/2, sellPad.y - sellPad.h/2, sellPad.w, sellPad.h, 14);
-        ctx.stroke();
         drawArrow(p.x + 24, p.y - 20, sellPad.x, sellPad.y - 16);
       } else if (game.carriedCash > 0) {
-        roundRect(cashPad.x - cashPad.w/2, cashPad.y - cashPad.h/2, cashPad.w, cashPad.h, 14);
-        ctx.stroke();
         drawArrow(p.x + 20, p.y - 24, cashPad.x, cashPad.y - 10);
       } else {
-        roundRect(basketZone.x - basketZone.w/2, basketZone.y - basketZone.h/2, basketZone.w, basketZone.h, 14);
-        ctx.stroke();
         drawArrow(p.x + 20, p.y - 30, basketZone.x, basketZone.y - 10);
       }
-      ctx.restore();
     }
 
     function drawPlayer() {
@@ -564,64 +579,41 @@
       const bob = p.moving ? Math.sin(game.time * .03) * 3 : 0;
       ctx.save();
       ctx.translate(p.x, p.y + bob);
-      if (p.dir < 0) ctx.scale(-1, 1);
 
-      ctx.fillStyle = 'rgba(0,0,0,.2)';
+      ctx.fillStyle = 'rgba(0,0,0,.24)';
       ctx.beginPath();
-      ctx.ellipse(0, 35 - bob, 24, 9, 0, 0, Math.PI*2);
+      ctx.ellipse(0, 30 - bob, 34, 12, 0, 0, Math.PI*2);
       ctx.fill();
 
-      ctx.strokeStyle = '#275073';
-      ctx.lineWidth = 7;
-      ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(-8, 25); ctx.lineTo(-15, 50); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(8, 25); ctx.lineTo(16, 49); ctx.stroke();
-      ctx.strokeStyle = '#f0c4a1';
-      ctx.lineWidth = 6;
-      ctx.beginPath(); ctx.moveTo(-17, 50); ctx.lineTo(-25, 51); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(17, 49); ctx.lineTo(25, 47); ctx.stroke();
+      const sway = p.moving ? Math.sin(game.time * .035) * .16 : 0;
+      ctx.save();
+      ctx.translate(0, -12);
+      ctx.rotate(sway);
+      if (!drawAsset('playerAvatar', 0, 0, 70, 96)) {
+        ctx.fillStyle = '#efbd93';
+        ctx.beginPath();
+        ctx.arc(0, 0, 35, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
 
-      ctx.fillStyle = '#f7f5e8';
-      roundRect(-14, -2, 28, 31, 9);
-      ctx.fill();
-      ctx.strokeStyle = '#e95e7d';
-      ctx.lineWidth = 5;
-      ctx.beginPath(); ctx.moveTo(-9, 2); ctx.lineTo(-6, 27); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(9, 2); ctx.lineTo(6, 27); ctx.stroke();
-
-      ctx.strokeStyle = '#f0c4a1';
-      ctx.lineWidth = 6;
-      ctx.beginPath(); ctx.moveTo(-13, 5); ctx.lineTo(-25, 22); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(13, 5); ctx.lineTo(25, 18); ctx.stroke();
-
-      ctx.fillStyle = '#efbd93';
-      ctx.beginPath();
-      ctx.ellipse(0, -16, 14, 16, 0, 0, Math.PI*2);
-      ctx.fill();
-      ctx.fillStyle = '#9d4d27';
-      ctx.beginPath();
-      ctx.ellipse(-3, -28, 18, 11, -.25, 0, Math.PI*2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(9, -20, 8, 13, -.35, 0, Math.PI*2);
-      ctx.fill();
-      ctx.fillStyle = '#5a2e22';
-      ctx.beginPath(); ctx.arc(-4, -16, 1.6, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(6, -16, 1.6, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle = '#a75243';
-      ctx.lineWidth = 1.6;
-      ctx.beginPath(); ctx.arc(1, -10, 5, .2, Math.PI-.2); ctx.stroke();
-
-      if (game.carriedEggs > 0) {
-        const eggX = game.carriedCash > 0 ? -16 : 0;
-        for (let i = 0; i < game.carriedEggs; i++) {
-          drawEgg(eggX, -44 - i * 12, .46);
+      const stackBaseX = 0;
+      if (game.carriedCash > 0) {
+        for (let i = 0; i < game.carriedCash; i++) {
+          const row = Math.floor(i / 2);
+          const col = i % 2;
+          const x = stackBaseX - 22 + col * 44;
+          const y = -70 - row * 26;
+          drawMoneyBill(x, y, 1, Math.PI / 6);
         }
       }
-      if (game.carriedCash > 0) {
-        const cashX = game.carriedEggs > 0 ? 18 : 0;
-        for (let i = 0; i < game.carriedCash; i++) {
-          drawMoneyBill(cashX, -45 - i * 10, .5, -.08);
+      if (game.carriedEggs > 0) {
+        for (let i = 0; i < game.carriedEggs; i++) {
+          const row = Math.floor(i / 2);
+          const col = i % 2;
+          const x = stackBaseX - 22 + col * 44;
+          const y = -78 - row * 26;
+          if (!drawAsset('egg', x, y, 40, 40, Math.PI / 2)) drawEgg(x, y, 1.25);
         }
       }
       ctx.restore();
@@ -629,37 +621,16 @@
 
     function drawHud() {
       ctx.save();
-      ctx.fillStyle = 'rgba(0,0,0,.23)';
-      roundRect(154, 18, 215, 48, 22);
-      ctx.fill();
-      const g = ctx.createLinearGradient(154, 18, 154, 66);
-      g.addColorStop(0, '#1d2b35');
-      g.addColorStop(1, '#0b1119');
-      ctx.fillStyle = g;
-      roundRect(160, 16, 206, 48, 22);
-      ctx.fill();
-      drawMoneyBill(181, 40, 1.25, -.05);
       ctx.fillStyle = '#fff';
-      ctx.font = `900 ${game.moneyPulse > 0 ? 29 : 26}px Arial Rounded MT Bold`;
+      ctx.font = `900 ${game.moneyPulse > 0 ? 39 : 35}px Arial Rounded MT Bold`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.shadowColor = 'rgba(0,0,0,.45)';
-      ctx.shadowBlur = 3;
-      ctx.fillText(`${game.money}`, 215, 40);
-      ctx.fillStyle = '#95d3a0';
-      ctx.font = '900 15px Arial Rounded MT Bold';
-      ctx.fillText(`/ ${game.targetMoney}`, 300, 41);
-
-      ctx.fillStyle = 'rgba(255,255,255,.93)';
-      roundRect(16, 20, 108, 55, 15);
-      ctx.fill();
-      ctx.fillStyle = '#1b82e8';
-      roundRect(19, 23, 102, 49, 13);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = '900 18px Arial Rounded MT Bold';
-      ctx.textAlign = 'center';
-      ctx.fillText('EGG FARM', 70, 48);
+      ctx.shadowColor = 'rgba(0,0,0,.62)';
+      ctx.shadowBlur = 5;
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(0,0,0,.28)';
+      ctx.strokeText(`${game.money}`, moneyTarget.x, moneyTarget.y);
+      ctx.fillText(`${game.money}`, moneyTarget.x, moneyTarget.y);
       ctx.restore();
     }
 
@@ -680,9 +651,13 @@
       for (const b of game.bills) drawMoneyBill(b.x, b.y, b.s, b.rot);
 
       for (const s of game.eggsSpark) {
+        const t = ease(clamp(s.t, 0, 1));
+        const x = s.sx + (s.tx - s.sx) * t;
+        const y = s.sy + (s.ty - s.sy) * t - Math.sin(t * Math.PI) * 36;
         ctx.save();
         ctx.globalAlpha = s.life;
-        drawEgg(s.x, s.y, s.s);
+        if (s.w && !drawAsset('egg', x, y, s.w, s.h, s.rot || 0)) drawEgg(x, y, s.s);
+        else if (!s.w) drawEgg(x, y, s.s);
         ctx.restore();
       }
     }
@@ -693,6 +668,11 @@
       game.collectTimer -= dt * 16.67;
       game.sellTimer -= dt * 16.67;
       game.cashTimer -= dt * 16.67;
+      game.eggBatchTimer -= dt * 16.67;
+      if (game.eggBatchTimer <= 0) {
+        spawnEggBatch(eggBatchSize);
+        game.eggBatchTimer = eggBatchInterval;
+      }
       game.moneyPulse = Math.max(0, game.moneyPulse - dt * 16.67);
 
       const keyX = (input.keys.has('ArrowRight') || input.keys.has('d') ? 1 : 0) - (input.keys.has('ArrowLeft') || input.keys.has('a') ? 1 : 0);
@@ -717,23 +697,24 @@
         }
       }
 
-      if (inRect(p.x, p.y + 25, basketZone) && game.carriedCash === 0 && game.collectTimer <= 0) {
-        game.collectTimer = 500;
+      if (inRect(p.x, p.y + 25, basketZone) && game.carriedCash === 0 && game.carriedEggs < maxCarriedEggs && game.productionEggs.length > 0 && game.collectTimer <= 0) {
+        game.collectTimer = collectInterval;
+        const egg = game.productionEggs.pop();
         game.carriedEggs++;
-        game.eggsSpark.push({ x: basketZone.x + (Math.random()-.5)*50, y: basketZone.y - 12, vx: (p.x-basketZone.x)/28, vy: -1.9, life: 1, s: .55 });
-        game.floating.push({ x: p.x, y: p.y - 76, text: `EGG x${game.carriedEggs}`, color: '#fff6bd', life: 1, vy: -1.1 });
-      }
-
-      if (inRect(p.x, p.y + 25, sellPad) && game.carriedEggs > 0 && game.sellTimer <= 0) {
-        game.sellTimer = 300;
+        const row = Math.floor((game.carriedEggs - 1) / 2);
+        const col = (game.carriedEggs - 1) % 2;
+        game.eggsSpark.push({ sx: egg.x, sy: egg.y, tx: p.x - 22 + col * 44, ty: p.y - 78 - row * 26, t: 0, life: 1, s: 1.25, w: 40, h: 40, rot: Math.PI / 2, mode: 'toPlayer' });
+        game.floating.push({ x: p.x, y: p.y - 86, text: `EGG x${game.carriedEggs}`, color: '#fff6bd', life: 1, vy: -1.1 });
+      } else if (inRect(p.x, p.y + 25, sellPad) && game.carriedEggs > 0 && game.sellTimer <= 0) {
+        game.sellTimer = 120;
         game.carriedEggs--;
         game.carriedCash++;
         game.floating.push({ x: sellPad.x, y: sellPad.y - 50, text: `BILL x${game.carriedCash}`, color: '#52ff72', life: 1, vy: -1.25 });
-        game.bills.push({ x: sellPad.x - 12 + Math.random()*24, y: sellPad.y - 28, tx: p.x, ty: p.y - 62, life: 0, s: .85, rot: (Math.random()-.5)*.7, mode: 'toPlayer' });
-      }
-
-      if (inRect(p.x, p.y + 25, cashPad) && game.carriedCash > 0 && game.cashTimer <= 0) {
-        game.cashTimer = 260;
+        const cashRow = Math.floor((game.carriedCash - 1) / 2);
+        const cashCol = (game.carriedCash - 1) % 2;
+        game.bills.push({ x: sellPad.x - 12 + Math.random()*24, y: sellPad.y - 28, tx: p.x - 22 + cashCol * 44, ty: p.y - 70 - cashRow * 26, life: 0, s: 1, rot: Math.PI / 6, mode: 'toPlayer' });
+      } else if (inRect(p.x, p.y + 25, cashPad) && game.carriedCash > 0 && game.cashTimer <= 0) {
+        game.cashTimer = 100;
         game.carriedCash--;
         game.money += game.eggValue;
         game.moneyPulse = 190;
@@ -758,17 +739,16 @@
       }
       game.bills = game.bills.filter(b => b.life < 1.12);
 
-      for (const s of game.eggsSpark) { s.x += s.vx * dt; s.y += s.vy * dt; s.life -= .035 * dt; s.vy += .04 * dt; }
-      game.eggsSpark = game.eggsSpark.filter(s => s.life > 0);
+      for (const s of game.eggsSpark) {
+        s.t += .07 * dt;
+        s.life = 1 - Math.max(0, s.t - .82) / .18;
+      }
+      game.eggsSpark = game.eggsSpark.filter(s => s.t < 1);
     }
 
     function render() {
       ctx.clearRect(0, 0, W, H);
       drawGround();
-      drawFence();
-      drawEggZone();
-      drawCounter();
-      drawInteractionPads();
       drawPlayer();
       drawFloating();
       drawHud();
@@ -822,11 +802,14 @@
       game.carriedEggs = 0;
       game.carriedCash = 0;
       game.complete = false;
-      game.player.x = 188;
-      game.player.y = 410;
+      game.eggBatchTimer = eggBatchInterval;
+      game.productionEggs = [];
+      game.player.x = 420;
+      game.player.y = 620;
       game.floating = [];
       game.bills = [];
       game.eggsSpark = [];
+      spawnEggBatch();
       winModal.classList.remove('show');
     });
   </script>
