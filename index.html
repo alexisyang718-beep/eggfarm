@@ -262,7 +262,7 @@
       background: 'assets/background-new.png',
       egg: 'assets/processed/egg_single.png',
       cashBill: 'assets/processed/cash_bill.png',
-      cashStack: 'assets/processed/cash_stack.png',
+      cashStack: 'assets/cash_stack_double.png?v=20260512-1100',
       playerAvatar: 'assets/processed/player_avatar.png',
       topCar: 'assets/processed/car_empty_horizontal.png',
       carEmpty: 'assets/processed/car_empty.png',
@@ -312,18 +312,20 @@
       { x: 286, y: 568 },
       { x: 274, y: 604 }
     ];
-    const topCar = { x: 92, y: 74, w: 245, h: 168 };
+    const topCar = { x: 126, y: 112, w: 245, h: 168 };
     const deliveryCarStart = { x: 116, y: 758 };
     const deliveryCarSize = { w: 260, h: 174 };
-    const trayDisplay = { x: 215, y: 540, w: 118, h: 100 };
-    const stationEggOrigin = { x: 266, y: 626 };
-    const stationEggSpacing = { x: 28, y: 16 };
-    const cashStackOrigin = { x: 510, y: 760 };
-    const cashStackSpacing = { x: 52, y: 28 };
-    const maxVisibleCashStacks = 18;
-    const cashPerStack = 80;
+    const trayDisplay = { x: 236, y: 590, w: 118, h: 100 };
+    const stationEggOrigin = { x: 170, y: 560 };
+    const stationEggSpacing = { x: 34, y: 19 };
+    const cashStackOrigin = { x: 500, y: 735 };
+    const cashStackSpacing = { x: 38, y: 5 };
+    const cashStackColumnDrop = 10;
+    const maxVisibleCashStacks = 50;
+    const cashStackRotation = 0;
+    const cashPerStack = 20;
     const bubbleDisplay = { x: 150, y: 655, w: 138, h: 110 };
-    const logoDisplay = { x: 118, y: 38, w: 186, h: 73 };
+    const logoDisplay = { x: 118, y: 38, w: 205, h: 80 };
     const cashDisplay = { x: 410, y: 38, w: 245, h: 50 };
 
     function spawnEggBatch(count = eggBatchSize) {
@@ -516,7 +518,7 @@
       const col = index % 2;
       return {
         x: cashStackOrigin.x + (col === 0 ? -cashStackSpacing.x / 2 : cashStackSpacing.x / 2),
-        y: cashStackOrigin.y - row * cashStackSpacing.y
+        y: cashStackOrigin.y + col * cashStackColumnDrop - row * cashStackSpacing.y
       };
     }
 
@@ -524,17 +526,28 @@
       const visibleEggs = Math.min(game.stationEggs, 30);
       for (let i = 0; i < visibleEggs; i++) {
         const pos = getStationEggPosition(i);
-        if (!drawAsset('egg', pos.x, pos.y, 25, 25, Math.PI / 2)) drawEgg(pos.x, pos.y, .72);
+        if (!drawAsset('egg', pos.x, pos.y, 30, 30, Math.PI / 2)) drawEgg(pos.x, pos.y, .86);
       }
     }
 
+    function getCarriedCashStackOffset(index) {
+      return {
+        x: 0,
+        y: -96 - index * 18
+      };
+    }
+
     function drawCashStack() {
+      const p = game.player;
+      const bob = p.moving ? Math.sin(game.time * .03) * 3 : 0;
       const visibleStacks = Math.min(game.cashStacks.length, maxVisibleCashStacks);
-      for (let i = visibleStacks - 1; i >= 0; i--) {
-        const pos = getCashStackPosition(i);
-        game.cashStacks[i].x = pos.x;
-        game.cashStacks[i].y = pos.y;
-        drawAsset('cashStack', pos.x, pos.y, 48, 45);
+      for (let i = 0; i < visibleStacks; i++) {
+        const offset = getCarriedCashStackOffset(i);
+        const x = p.x + offset.x;
+        const y = p.y + bob + offset.y;
+        game.cashStacks[i].x = x;
+        game.cashStacks[i].y = y;
+        drawAsset('cashStack', x, y, 104, 104, cashStackRotation);
       }
     }
 
@@ -808,8 +821,6 @@
               x: deliveryCarStart.x,
               y: deliveryCarStart.y
             });
-            const stackPos = getCashStackPosition(game.cashStacks.length);
-            game.cashStacks.push({ x: stackPos.x, y: stackPos.y, value: cashPerStack });
             game.orderEggs = 0;
             game.trayEggs = 0;
             game.packState = 'carLeaving';
@@ -862,6 +873,10 @@
         game.orderEggs += packCount;
         game.trayEggs = game.orderEggs;
         game.stationEggs -= packCount;
+        if (packCount >= 2) {
+          const stackPos = getCashStackPosition(game.cashStacks.length);
+          game.cashStacks.push({ x: stackPos.x, y: stackPos.y, value: cashPerStack });
+        }
         if (game.orderEggs >= 4) {
           game.packState = 'fullShow';
           game.packTimer = 300;
@@ -921,8 +936,8 @@
       drawVehiclesAndOrder();
       drawTrayEggs();
       drawStationEggs();
-      drawCashStack();
       drawPlayer();
+      drawCashStack();
       drawFloating();
       drawTopUi();
       drawHud();
